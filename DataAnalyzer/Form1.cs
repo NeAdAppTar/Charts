@@ -1,437 +1,334 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace DataAnalyzer
 {
     public partial class Form1 : Form
     {
-        private List<DataEntry> dataEntries;
-        private float initialPressure = 95000; // Начальное значение давления
+        private Dictionary<string, List<double>> data;
+        private string[] skeleton;
+        private List<Chart> charts;
 
         public Form1()
         {
             InitializeComponent();
+            data = new Dictionary<string, List<double>>();
+            charts = new List<Chart>();
         }
 
-        private void BtnLoadFile_Click(object sender, EventArgs e)
+
+
+        private void buttonLoadData_Click(object sender, EventArgs e)
         {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*";
+
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
-                LoadDataFromFile(openFileDialog.FileName);
+                string[] lines = File.ReadAllLines(openFileDialog.FileName);
+                ParseData(lines);
                 CreateCharts();
-                
             }
         }
 
-        private void BtnLoadFile2_Click(object sender, EventArgs e)
+        private void ParseData(string[] lines)
         {
-            if (openFileDialog.ShowDialog() == DialogResult.OK)
+            data.Clear();
+            skeleton = txtSkeleton.Text.Split(';');
+
+            // Инициализируем словарь, привязывая ключи из скелета
+            foreach (string key in skeleton)
             {
-                LoadDataFromFile2(openFileDialog.FileName);
-                CreateChartsForFile2();
+                data[key] = new List<double>();
             }
-        }
 
-
-        private void BtnSaveCharts_Click(object sender, EventArgs e)
-        {
-            if (folderBrowserDialog.ShowDialog() == DialogResult.OK)
+            foreach (string line in lines)
             {
-                SaveAllCharts(folderBrowserDialog.SelectedPath);
-            }
-        }
+                string[] values = line.Split(';');
 
-        private void BtnSetInitialPressure_Click(object sender, EventArgs e)
-        {
-            string userInput = Microsoft.VisualBasic.Interaction.InputBox("Введите начальное значение давления (в Па):", "Настройка начального давления", initialPressure.ToString());
-
-            if (!string.IsNullOrEmpty(userInput))
-            {
-                if (float.TryParse(userInput, out float newInitialPressure))
+                // Проверка на совпадение количества данных с количеством ключей в скелете
+                if (values.Length != skeleton.Length)
                 {
-                    initialPressure = newInitialPressure;
-                    MessageBox.Show($"Начальное давление установлено на {initialPressure} Па.");
+                    continue; // Пропускаем строки с неправильным количеством данных
                 }
-                else
-                {
-                    MessageBox.Show("Некорректное значение давления.");
-                }
-            }
-        }
 
-        private void LoadDataFromFile(string filePath)
-        {
-            dataEntries = new List<DataEntry>();
-
-            var lines = File.ReadAllLines(filePath);
-            foreach (var line in lines)
-            {
-                var parts = line.Split(';');
-                if (parts.Length == 15)
+                for (int i = 0; i < skeleton.Length; i++)
                 {
-                    dataEntries.Add(new DataEntry
+                    // Игнорируем нечисловые данные (например, "ID")
+                    if (skeleton[i] == "ID")
                     {
-                        TeamID = parts[0],
-                        Time = float.Parse(parts[1]) / 1000,
-                        Altitude = float.Parse(parts[2]) / 100,
-                        Pressure = float.Parse(parts[3]),
-                        Temperature = float.Parse(parts[4]) / 100,
-                        Accel1 = float.Parse(parts[5]) * 9.81f / 100,
-                        Accel2 = float.Parse(parts[6]) * 9.81f / 100,
-                        Accel3 = float.Parse(parts[7]) * 9.81f / 100,
-                        Gyro1 = float.Parse(parts[8]) / 100,
-                        Gyro2 = float.Parse(parts[9]) / 100,
-                        Gyro3 = float.Parse(parts[10]) / 100,
-                        Flag1 = int.Parse(parts[11]),
-                        Flag2 = int.Parse(parts[12]),
-                        Flag3 = int.Parse(parts[13]),
-                        Flag4 = int.Parse(parts[14])
-                    });
-                }
-            }
+                        continue; // Пропускаем строку ID, так как это не числовое значение
+                    }
 
-            Console.WriteLine($"Загружено {dataEntries.Count} записей.");
-            Console.WriteLine($"Количество записей с Flag1 == 1: {dataEntries.Count(entry => entry.Flag1 == 1)}");
-            Console.WriteLine($"Количество записей с Flag4 == 1: {dataEntries.Count(entry => entry.Flag4 == 1)}");
-        }
-
-        private void LoadDataFromFile2(string filePath)
-        {
-            dataEntries = new List<DataEntry>();
-
-            var lines = File.ReadAllLines(filePath);
-            foreach (var line in lines)
-            {
-                var parts = line.Split(';');
-                if (parts.Length == 10)
-                {
-                    dataEntries.Add(new DataEntry
+                    // Преобразуем значения в числа и добавляем в соответствующие ключи
+                    if (double.TryParse(values[i], out double result))
                     {
-                        TeamID = parts[0],
-                        Time = float.Parse(parts[1]) / 1000,
-                        Altitude = float.Parse(parts[2]) / 100,
-                        Accel1 = float.Parse(parts[3]) * 9.81f / 100,
-                        Accel2 = float.Parse(parts[4]) * 9.81f / 100,
-                        Accel3 = float.Parse(parts[5]) * 9.81f / 100,
-                        Flag1 = int.Parse(parts[6]),
-                        Flag2 = int.Parse(parts[7]),
-                        Flag3 = int.Parse(parts[8]),
-                        Flag4 = int.Parse(parts[9])
-                    });
+                        if (skeleton[i] == "h") // Высота в см, переводим в метры
+                        {
+                            data[skeleton[i]].Add(result / 100);
+                        }
+                        else if (skeleton[i] == "t") // Время в мс, переводим в секунды
+                        {
+                            data[skeleton[i]].Add(result / 1000);
+                        }
+                        else if (skeleton[i] == "T") // Температура в градусах, делим на 100
+                        {
+                            data[skeleton[i]].Add(result / 100);
+                        }
+                        else if (skeleton[i].StartsWith("a")) // Акселерометр: умножаем на 9.81 и делим на 100
+                        {
+                            data[skeleton[i]].Add(result * 9.81 / 100);
+                        }
+                        else if (skeleton[i].StartsWith("g")) // Гироскоп: делим на 100
+                        {
+                            data[skeleton[i]].Add(result / 100);
+                        }
+                        else // Другие значения (например, давление)
+                        {
+                            data[skeleton[i]].Add(result);
+                        }
+                    }
+                    else
+                    {
+                        continue; // Пропускаем, если не удалось преобразовать в число
+                    }
                 }
             }
-
-            Console.WriteLine($"Загружено {dataEntries.Count} записей.");
-
-            // Фильтрация данных до 10 строк до флага старта и после флага приземления
-            FilterDataByFlags();
         }
 
-        private void FilterDataByFlags()
+        private void TrimDataBasedOnFlags()
         {
-            // Находим индекс старта (первый индекс, где хотя бы один флаг == 1)
-            int startIndex = dataEntries.FindIndex(entry => entry.Flag1 == 1 || entry.Flag2 == 1 || entry.Flag3 == 1 || entry.Flag4 == 1);
-            int endIndex = dataEntries.FindLastIndex(entry => entry.Flag1 == 1 || entry.Flag2 == 1 || entry.Flag3 == 1 || entry.Flag4 == 1);
+            
 
-            // Если старт не найден, выводим сообщение об ошибке
-            if (startIndex == -1)
+            int startIndex = 0;
+            int endIndex = data["t"].Count - 1;
+
+            // Если есть срабатывание f1, обрезаем начало данных
+            
+
+            // Обрезаем все массивы данных
+            foreach (var key in data.Keys.ToList())
             {
-                MessageBox.Show("Записи с флагами, равными 1, не найдены.");
-                return;
-                
+                data[key] = data[key].Skip(startIndex).Take(endIndex - startIndex + 1).ToList();
             }
-
-            // Обрезаем данные до 10 строк до старта и после приземления
-            int startTrimIndex = Math.Max(0, startIndex - 10);
-            int endTrimIndex = Math.Min(dataEntries.Count - 1, endIndex + 10);
-
-            dataEntries = dataEntries.GetRange(startTrimIndex, endTrimIndex - startTrimIndex + 1);
         }
-        
+
+
+
+
 
         private void CreateCharts()
         {
-            chart1.Controls.Clear();
+            TrimDataBasedOnFlags();
 
-            var startIdx = dataEntries.FindIndex(entry => entry.Flag1 == 1 || entry.Flag2 == 1 || entry.Flag3 == 1 || entry.Flag4 == 1);
-            var endIdx = dataEntries.FindLastIndex(entry => entry.Flag1 == 1 || entry.Flag2 == 1 || entry.Flag3 == 1 || entry.Flag4 == 1);
+            chartContainer.Controls.Clear();
+            charts.Clear();
 
-            if (startIdx == -1 || endIdx == -1)
+            // График высоты от времени
+            if (data.ContainsKey("t") && data.ContainsKey("h"))
             {
-                MessageBox.Show("Не удалось найти записи с флагом 1 в данных.");
-                return;
+                Chart altitudeChart = CreateChart("Зависимость высоты от времени", "Время (с)", "Высота (м)", data["t"], data["h"]);
+                AddChartToContainer(altitudeChart);
             }
 
-            startIdx = Math.Max(0, startIdx - 10);
-            endIdx = Math.Min(dataEntries.Count - 1, endIdx + 10);
-
-            var filteredData = dataEntries.Skip(startIdx).Take(endIdx - startIdx + 1).ToList();
-
-            if (filteredData.Count == 0)
+            // График давления от времени
+            // График давления от времени
+            if (data.ContainsKey("t") && data.ContainsKey("p"))
             {
-                MessageBox.Show("Нет данных для построения графиков.");
-                return;
+                Chart pressureChart = CreateChart("Зависимость давления от времени", "Время (с)", "Давление (Па)", data["t"], data["p"]);
+
+                // Устанавливаем минимальное значение оси Y рядом с самой нижней точкой
+                double minPressure = data["p"].Min();
+                pressureChart.ChartAreas[0].AxisY.Minimum = minPressure - (minPressure * 0.05); // Немного ниже минимальной точки
+
+                AddChartToContainer(pressureChart);
             }
 
-            var timeData = filteredData.Select(entry => entry.Time).ToArray();
 
-            CreateChart("Зависимость высоты от времени", "Время (с)", "Высота (м)", false, false, timeData, filteredData.Select(entry => entry.Altitude).ToArray());
-            CreateChart("Зависимость давления от времени", "Время (с)", "Давление (Па)", false, false, timeData, filteredData.Select(entry => entry.Pressure).ToArray());
-            CreateChart("Зависимость высоты от температуры", "Температура (°C)", "Высота (м)", false, true, filteredData.Select(entry => entry.Temperature).ToArray(), filteredData.Select(entry => entry.Altitude).ToArray());
-
-            var accelX = filteredData.Select(entry => entry.Accel1).ToArray();
-            var accelY = filteredData.Select(entry => entry.Accel2).ToArray();
-            var accelZ = filteredData.Select(entry => entry.Accel3).ToArray();
-            var vectorAccel = new float[accelX.Length];
-
-            for (int i = 0; i < accelX.Length; i++)
+            // График высоты от температуры
+            if (data.ContainsKey("T") && data.ContainsKey("h"))
             {
-                vectorAccel[i] = (float)Math.Sqrt(Math.Pow(accelX[i], 2) + Math.Pow(accelY[i], 2) + Math.Pow(accelZ[i], 2));
+                Chart heightTempChart = CreateChart("Зависимость высоты от температуры", "Температура (°C)", "Высота (m)", data["T"], data["h"]);
+                heightTempChart.ChartAreas[0].AxisX.LabelStyle.Format = "F2"; // Округляем до сотых
+                AddChartToContainer(heightTempChart);
             }
 
-            var chartAltitude = CreateChart("Зависимость высоты от времени", "Время (с)", "Высота (м)", false, false, timeData, filteredData.Select(entry => entry.Altitude).ToArray());
-            chart1.Controls.Add(chartAltitude);
+            // График ускорения (по трём осям и векторное ускорение)
+            if (data.ContainsKey("t") && data.ContainsKey("aX") && data.ContainsKey("aY") && data.ContainsKey("aZ"))
+            {
+                Chart accelChart = new Chart();
+                accelChart.ChartAreas.Add(new ChartArea("Зависимость линейного ускорения от времени"));
 
-            var chartPressure = CreateChart("Зависимость давления от времени", "Время (с)", "Давление (Па)", false, false, timeData, filteredData.Select(entry => entry.Pressure).ToArray());
-            chart1.Controls.Add(chartPressure);
+                // Добавляем данные по каждой оси
+                AddSeries(accelChart, "ось X", data["t"], data["aX"], SeriesChartType.Line, 3);
+                AddSeries(accelChart, "ось Y", data["t"], data["aY"], SeriesChartType.Line, 3);
+                AddSeries(accelChart, "ось Z", data["t"], data["aZ"], SeriesChartType.Line, 3);
 
-            var chartHeightTemperature = CreateChart("Зависимость высоты от температуры", "Температура (°C)", "Высота (м)", false, true, filteredData.Select(entry => entry.Temperature).ToArray(), filteredData.Select(entry => entry.Altitude).ToArray());
-            chart1.Controls.Add(chartHeightTemperature);
+                // Рассчёт векторного ускорения
+                List<double> vectorAccel = data["aX"].Zip(data["aY"], (x, y) => new { x, y })
+                    .Zip(data["aZ"], (xy, z) => Math.Sqrt(xy.x * xy.x + xy.y * xy.y + z * z))
+                    .ToList();
 
-            var chartAcceleration = CreateChart("Зависимость линейного ускорения от времени", "Время (с)", "Линейное ускорение (м/с²)", true, false, timeData, accelX, accelY, accelZ, vectorAccel);
-            AddZeroLine(chartAcceleration.ChartAreas[0]); // Добавление линии с цифрой 0 только для этого графика
-            chart1.Controls.Add(chartAcceleration);
+                AddSeries(accelChart, "Абсолютное ускорение", data["t"], vectorAccel, SeriesChartType.Line, 3);
 
-            var chartAngularVelocity = CreateChart("Зависимость угловой скорости от времени", "Время (с)", "Угловая скорость (°/с)", true, false, timeData,
-                filteredData.Select(entry => entry.Gyro1).ToArray(),
-                filteredData.Select(entry => entry.Gyro2).ToArray(),
-                filteredData.Select(entry => entry.Gyro3).ToArray());
-            AddZeroLine(chartAngularVelocity.ChartAreas[0]); // Добавление линии с цифрой 0 только для этого графика
-            chart1.Controls.Add(chartAngularVelocity);
+                accelChart.Titles.Add("Зависимость линейного ускорения от времени");
+
+                // Добавляем легенду
+                accelChart.Legends.Add(new Legend());
+
+                // Устанавливаем соотношение сторон 16:9
+                accelChart.Width = 960; // 16
+                accelChart.Height = 540; // 9
+
+                AddChartToContainer(accelChart);
+            }
+
+            // График угловой скорости (по трём осям)
+            if (data.ContainsKey("t") && data.ContainsKey("gX") && data.ContainsKey("gY") && data.ContainsKey("gZ"))
+            {
+                Chart gyroChart = new Chart();
+                gyroChart.ChartAreas.Add(new ChartArea("Зависимость угловой скорости от времени"));
+
+                AddSeries(gyroChart, "ось X", data["t"], data["gX"], SeriesChartType.Line, 3);
+                AddSeries(gyroChart, "ось Y", data["t"], data["gY"], SeriesChartType.Line, 3);
+                AddSeries(gyroChart, "ось Z", data["t"], data["gZ"], SeriesChartType.Line, 3);
+
+                gyroChart.Titles.Add("Зависимость угловой скорости от времени");
+
+                // Добавляем легенду
+                gyroChart.Legends.Add(new Legend());
+
+                // Устанавливаем соотношение сторон 16:9
+                gyroChart.Width = 960; // 16
+                gyroChart.Height = 540; // 9
+
+                AddChartToContainer(gyroChart);
+            }
         }
 
-        private Chart CreateChart(string title, string xAxisTitle, string yAxisTitle, bool addSeriesNames, bool isTemperature, float[] xData, params float[][] yDataSeries)
+        private Chart CreateChart(string title, string xTitle, string yTitle, List<double> xValues, List<double> yValues)
         {
-            var chart = new Chart
-            {
-                Width = 1000,
-                Height = 600
-            };
+            Chart chart = new Chart();
+            chart.ChartAreas.Add(new ChartArea(title));
 
-            var chartArea = new ChartArea();
-            chart.ChartAreas.Add(chartArea);
+            // Устанавливаем размеры графика для соотношения 16:9
+            chart.Width = 800; // или нужная вам ширина
+            chart.Height = 450; // 800 * 9 / 16 для соотношения 16:9
 
-            var legend = new Legend();
-            chart.Legends.Add(legend);
-
-            string[] seriesNames = { "X", "Y", "Z", "Векторное ускорение" };
-
-            for (int i = 0; i < yDataSeries.Length; i++)
-            {
-                var series = new Series
-                {
-                    ChartType = SeriesChartType.Line,
-                    Name = addSeriesNames ? seriesNames[i] : "Линия зависимости",
-                    BorderWidth = 3
-                };
-
-                HashSet<float> xValuesSet = new HashSet<float>();
-
-                for (int j = 0; j < xData.Length; j++)
-                {
-                    float xValue = xData[j];
-                    if (!xValuesSet.Contains(xValue))
-                    {
-                        xValuesSet.Add(xValue);
-
-                        string xLabel = xAxisTitle == "Время (с)" ? xValue.ToString("0") : xValue.ToString("0.##");
-
-                        float yValue = yDataSeries[i][j];
-                        // Округляем значение высоты, если график зависимости высоты от температуры
-                        if (title.Contains("Зависимость высоты от температуры"))
-                        {
-                            yValue = (float)Math.Round(yValue);
-                        }
-
-                        series.Points.AddXY(xLabel, yValue);
-                    }
-                }
-
-                chart.Series.Add(series);
-            }
+            AddSeries(chart, title, xValues, yValues, SeriesChartType.Line, 3);
 
             chart.Titles.Add(title);
-            chartArea.AxisX.Title = xAxisTitle;
-            chartArea.AxisY.Title = yAxisTitle;
+            chart.ChartAreas[0].AxisX.Title = xTitle;
+            chart.ChartAreas[0].AxisY.Title = yTitle;
+            chart.ChartAreas[0].AxisX.LabelStyle.Format = "{0;0,}"; // Округление оси X (время)
 
-            if (yAxisTitle == "Давление (Па)")
-            {
-                // Устанавливаем минимальное значение оси Y для графика давления с учетом начального давления
-                chartArea.AxisY.Minimum = initialPressure;
-            }
-            else
-            {
-                FormatChartAreaAxes(chartArea, isTemperature, title.Contains("Зависимость высоты от температуры"));
-            }
+            // Добавляем легенду
+            chart.Legends.Add(new Legend());
 
             return chart;
         }
 
-        private void CreateChartsForFile2()
+        private void AddSeries(Chart chart, string seriesName, List<double> xValues, List<double> yValues, SeriesChartType chartType, int lineWidth)
         {
-            chart1.Controls.Clear();
-
-            if (dataEntries.Count == 0)
+            Series series = new Series(seriesName)
             {
-                MessageBox.Show("Нет данных для построения графиков.");
-                return;
-            }
-
-           var timeData = dataEntries.Select(entry => entry.Time).ToArray();
-           var altitudeData = dataEntries.Select(entry => entry.Altitude).ToArray();
-
-            // Создаем график зависимости высоты от времени
-            var chartHeightTime = CreateChart("Зависимость высоты от времени", "Время (с)", "Высота (м)", false, false, timeData, altitudeData);
-            chart1.Controls.Add(chartHeightTime);
-
-            var accelX = dataEntries.Select(entry => entry.Accel1).ToArray();
-            var accelY = dataEntries.Select(entry => entry.Accel2).ToArray();
-            var accelZ = dataEntries.Select(entry => entry.Accel3).ToArray();
-            var vectorAccel = new float[accelX.Length];
-
-            for (int i = 0; i < accelX.Length; i++)
-            {
-                vectorAccel[i] = (float)Math.Sqrt(Math.Pow(accelX[i], 2) + Math.Pow(accelY[i], 2) + Math.Pow(accelZ[i], 2));
-            }
-
-            var chartAcceleration = CreateChart("Зависимость линейного ускорения от времени", "Время (с)", "Линейное ускорение (м/с²)", true, false, timeData, accelX, accelY, accelZ, vectorAccel);
-            AddZeroLine(chartAcceleration.ChartAreas[0]); // Добавление линии с цифрой 0 только для этого графика
-            chart1.Controls.Add(chartAcceleration);
-        }
-
-        private void CreateHeightTimeChart()
-        {
-            var timeData = dataEntries.Select(entry => entry.Time).ToArray();
-            var altitudeData = dataEntries.Select(entry => entry.Altitude).ToArray();
-
-            var chartHeightTime = CreateChart("Зависимость высоты от времени", "Время (с)", "Высота (м)", false, false, timeData, altitudeData);
-            chart1.Controls.Add(chartHeightTime);
-        }
-
-
-
-
-        private void AddZeroLine(ChartArea chartArea)
-        {
-            var zeroLine = new StripLine
-            {
-                IntervalOffset = 0,
-                StripWidth = 0.1,
-                Interval = 0,
-                BorderColor = Color.Red,
-                BorderWidth = 2
+                ChartType = chartType,
+                XValueType = ChartValueType.Double,
+                YValueType = ChartValueType.Double,
+                BorderWidth = lineWidth // Толщина линии
             };
-            chartArea.AxisY.StripLines.Add(zeroLine);
+            series.Points.DataBindXY(xValues, yValues);
+            chart.Series.Add(series);
+            chart.ChartAreas[0].AxisX.LabelStyle.Format = "{0;0,}"; // Округление оси X (время)
         }
 
-        private void SetYAxisLimits(ChartArea chartArea, float[][] yDataSeries)
+
+
+
+
+        private Tuple<List<double>, List<double>> TrimData(List<double> xValues, List<double> yValues, double threshold)
         {
-            float minY = yDataSeries.SelectMany(y => y).Min();
-            float maxY = yDataSeries.SelectMany(y => y).Max();
+            int startIndex = 0;
+            int endIndex = xValues.Count - 1;
 
-            float padding = (maxY - minY) * 0.0f;
-
-            chartArea.AxisY.Minimum = minY - padding;
-            chartArea.AxisY.Maximum = maxY + padding;
-        }
-
-        private void FormatChartAreaAxes(ChartArea chartArea, bool isTemperature, bool isHeightVsTemperature)
-        {
-            chartArea.AxisX.LabelStyle.Format = "0.#";
-
-            if (isHeightVsTemperature)
+            // Найти начало полета
+            for (int i = 0; i < yValues.Count; i++)
             {
-                chartArea.AxisY.LabelStyle.Format = "0";
-            }
-            else if (isTemperature)
-            {
-                chartArea.AxisY.LabelStyle.Format = "0.##";
-            }
-            else
-            {
-                chartArea.AxisY.LabelStyle.Format = GetAxisFormat(chartArea.AxisY.Minimum, chartArea.AxisY.Maximum);
-            }
-        }
-
-        private string GetAxisFormat(double minValue, double maxValue)
-        {
-            double range = maxValue - minValue;
-
-            if (range <= 10)
-            {
-                return "0.##";
-            }
-            else if (range <= 100)
-            {
-                return "0.#";
-            }
-            else
-            {
-                return "0";
-            }
-        }
-
-        private void SaveAllCharts(string folderPath)
-        {
-            foreach (var control in chart1.Controls)
-            {
-                if (control is Chart chart)
+                if (yValues[i] > threshold)
                 {
-                    var chartTitle = chart.Titles[0].Text;
-                    var sanitizedTitle = string.Concat(chartTitle.Split(Path.GetInvalidFileNameChars()));
-                    var filePath = Path.Combine(folderPath, $"{sanitizedTitle}.png");
-                    chart.SaveImage(filePath, ImageFormat.Png);
+                    startIndex = i;
+                    break;
                 }
             }
 
-            MessageBox.Show("Графики успешно сохранены.");
+            // Найти конец полета
+            for (int i = yValues.Count - 1; i >= 0; i--)
+            {
+                if (yValues[i] > threshold)
+                {
+                    endIndex = i;
+                    break;
+                }
+            }
+
+            // Создание новых обрезанных списков
+            var trimmedX = xValues.Skip(startIndex).Take(endIndex - startIndex + 1).Select(x => Math.Round(x / 1000, 2)).ToList();
+            var trimmedY = yValues.Skip(startIndex).Take(endIndex - startIndex + 1).Select(y => Math.Round(y / 100, 2)).ToList();
+
+            return new Tuple<List<double>, List<double>>(trimmedX, trimmedY);
         }
 
-        private void SaveChart(Chart chart, string fileName)
+        private List<double> ConvertToAcceleration(List<double> values)
         {
-            using (Bitmap bmp = new Bitmap(chart.Width, chart.Height))
+            return values.Select(v => Math.Round(v * 9.81 / 100, 2)).ToList();
+        }
+
+        private List<double> ConvertToGyro(List<double> values)
+        {
+            return values.Select(v => Math.Round(v / 100, 2)).ToList();
+        }
+
+        private List<double> CalculateVectorAcceleration(List<double> ax, List<double> ay, List<double> az)
+        {
+            return ax.Zip(ay, (x, y) => new { x, y })
+                     .Zip(az, (xy, z) => Math.Round(Math.Sqrt(xy.x * xy.x + xy.y * xy.y + z * z), 2))
+                     .ToList();
+        }
+
+        
+
+        private void AddChartToContainer(Chart chart)
+        {
+            chart.Dock = DockStyle.Top;
+            chartContainer.Controls.Add(chart);
+            charts.Add(chart);
+        }
+
+        private void btnSaveCharts_Click(object sender, EventArgs e)
+        {
+            foreach (var chart in charts)
             {
-                chart.DrawToBitmap(bmp, new Rectangle(0, 0, chart.Width, chart.Height));
-                bmp.Save(fileName, ImageFormat.Png);
+                SaveFileDialog saveFileDialog = new SaveFileDialog
+                {
+                    Filter = "PNG Image|*.png",
+                    Title = "Save Chart as Image File",
+                    FileName = chart.Titles[0].Text + ".png"
+                };
+
+                if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    chart.SaveImage(saveFileDialog.FileName, ChartImageFormat.Png);
+                }
             }
         }
 
-        public class DataEntry
+        private void label2_Click(object sender, EventArgs e)
         {
-            public string TeamID { get; set; }
-            public float Time { get; set; }
-            public float Pressure { get; set; }
-            public float Temperature { get; set; }
-            public float Altitude { get; set; }
-            public float Accel1 { get; set; }
-            public float Accel2 { get; set; }
 
-            public float Accel3 { get; set; }
-            public float Gyro1 { get; set; }
-            public float Gyro2 { get; set; }
-            public float Gyro3 { get; set; }
-            public int Flag1 { get; set; }
-            public int Flag2 { get; set; }
-            public int Flag3 { get; set; }
-            public int Flag4 { get; set; }
         }
     }
 }
-
-
